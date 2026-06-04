@@ -300,44 +300,40 @@ app.ws("/media-stream/:callId", async (ws, req) => {
       } else if (message.type === 'response.output_item.added') {
         // Silently handle - output item added to response
       } else if (message.type === 'response.output_item.done') {
-        // Check if this is a function call
-        if (message.item?.type === 'function_call') {
-          // Handle function call asynchronously
-          (async () => {
-            const functionName = message.item.name;
-            const callId_fn = message.item.call_id;
-            let args: Record<string, any> = {};
-            
-            try {
-              args = JSON.parse(message.item.arguments || '{}');
-            } catch (e) {
-              // Failed to parse function arguments
-            }
-            
-            console.log(`[${callId}] FUNCTION CALL: ${functionName}(${JSON.stringify(args)})`);
-            
-            // Execute the tool
-            const result = await handleToolCall(functionName, args, callerPhone);
-            console.log(`[${callId}] FUNCTION RESULT: ${result}`);
-            
-            // Send the function result back to XAI
-            const functionResult = {
-              type: 'conversation.item.create',
-              item: {
-                type: 'function_call_output',
-                call_id: callId_fn,
-                output: result,
-              }
-            };
-            logEvent(callId, functionResult.type);
-            xaiWs.send(JSON.stringify(functionResult));
-            
-            // Trigger a new response to continue the conversation
-            const responseCreate = { type: 'response.create' };
-            logEvent(callId, responseCreate.type);
-            xaiWs.send(JSON.stringify(responseCreate));
-          })();
-        }
+  if (message.item?.type === 'function_call') {
+    const functionName = message.item.name;
+    const callId_fn = message.item.call_id;
+    let args: Record<string, any> = {};
+    
+    try {
+      args = JSON.parse(message.item.arguments || '{}');
+    } catch (e) {}
+
+    console.log(`[${callId}] FUNCTION CALL: ${functionName}(${JSON.stringify(args)})`);
+
+    // Use empty string for now (we'll improve phone capture later)
+    const result = await handleToolCall(functionName, args, "");
+
+    console.log(`[${callId}] FUNCTION RESULT: ${result}`);
+    
+    const functionResult = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'function_call_output',
+        call_id: callId_fn,
+        output: result,
+      }
+    };
+    
+    logEvent(callId, functionResult.type);
+    xaiWs.send(JSON.stringify(functionResult));
+
+    // Trigger a new response to continue the conversation
+    const responseCreate = { type: 'response.create' };
+    logEvent(callId, responseCreate.type);
+    xaiWs.send(JSON.stringify(responseCreate));
+  }
+}
       } else if (message.type === 'conversation.item.input_audio_transcription.completed') {
         // Log user speech transcription
         if (message.transcript) {
