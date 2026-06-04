@@ -13,6 +13,12 @@ app.use(express.urlencoded({ extended: true })).use(express.json());
 // ========================================
 const XAI_API_KEY = process.env.XAI_API_KEY || "";
 const API_URL = process.env.API_URL || "wss://api.x.ai/v1/realtime";
+
+// Twilio credentials for sending SMS
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "";
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "";
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER || "";
+
 // Feature flags
 const ENABLE_TOOLS = process.env.ENABLE_TOOLS !== "false"; // Default: enabled
 
@@ -42,24 +48,33 @@ const tools = [
     parameters: {
       type: "object",
       properties: {
-        min: {
-          type: "number",
-          description: "Minimum value (inclusive)",
-        },
-        max: {
-          type: "number",
-          description: "Maximum value (inclusive)",
-        },
+        min: { type: "number", description: "Minimum value (inclusive)" },
+        max: { type: "number", description: "Maximum value (inclusive)" },
       },
       required: ["min", "max"],
     },
   },
+  {
+    type: "function",
+    name: "send_ordering_link",
+    description: "Send the direct online ordering link to the customer via text message",
+    parameters: {
+      type: "object",
+      properties: {
+        message: {
+          type: "string",
+          description: "Short message to send along with the link (e.g. 'Here's our online ordering menu!')"
+        }
+      },
+      required: ["message"]
+    }
+  }
 ];
 
 // ========================================
 // Tool Handlers
 // ========================================
-async function handleToolCall(name: string, args: Record<string, any>): Promise<string> {
+async function handleToolCall(name: string, args: Record<string, any>, callerPhone?: string): Promise<string> {
   switch (name) {
     case "generate_random_number": {
       const min = Math.ceil(args.min);
@@ -67,6 +82,30 @@ async function handleToolCall(name: string, args: Record<string, any>): Promise<
       const result = Math.floor(Math.random() * (max - min + 1)) + min;
       return JSON.stringify({ result, min: args.min, max: args.max });
     }
+
+    case "send_ordering_link": {
+      if (!callerPhone) {
+        return JSON.stringify({ error: "Phone number not available" });
+      }
+
+      const message = args.message || "Here's our online ordering link!";
+
+      try {
+        const client = require('twilio')(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+        
+        await client.messages.create({
+          body: `${message}\n\nhttps://order.smoothieking.com/location/2463-smoothie-king-2055-east-andrew-johnson-highway-suite-1/menu`,
+          from: TWILIO_PHONE_NUMBER,
+          to: callerPhone
+        });
+
+        return JSON.stringify({ success: true, message: "Ordering link sent via text" });
+      } catch (error) {
+        console.error("Failed to send SMS:", error);
+        return JSON.stringify({ error: "Failed to send text message" });
+      }
+    }
+
     default:
       return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
@@ -89,6 +128,7 @@ app.get("/health", (req, res) => {
 app.post("/twiml", async (req, res) => {
   try {
     const callId = generateSecureId('call');
+    const callerPhone = req.body.From || "";   // ← This captures the caller's number
 
     if (!process.env.HOSTNAME) {
       res.status(500).send("Server misconfigured: HOSTNAME not set");
@@ -97,10 +137,9 @@ app.post("/twiml", async (req, res) => {
 
     res.status(200);
     res.type("text/xml");
-
     const hostname = process.env.HOSTNAME.replace(/^https?:\/\//, '');
     const streamUrl = `wss://${hostname}/media-stream/${callId}`;
-
+    
     const twimlResponse = `\
 <Response>
   <Connect>
@@ -278,7 +317,7 @@ app.ws("/media-stream/:callId", async (ws, req) => {
             console.log(`[${callId}] FUNCTION CALL: ${functionName}(${JSON.stringify(args)})`);
             
             // Execute the tool
-            const result = await handleToolCall(functionName, args);
+            const result = await handleToolCall(functionName, args, callerPhone);
             console.log(`[${callId}] FUNCTION RESULT: ${result}`);
             
             // Send the function result back to XAI
