@@ -237,7 +237,7 @@ app.ws("/media-stream/:callId", async (ws, req) => {
           type: 'session.update',
           session: {
             instructions: bot.instructions,
-            voice: 'nova',
+            voice: 'rex',
             audio: {
               input: { format: { type: 'audio/pcmu' } },
               output: { format: { type: 'audio/pcmu' } },
